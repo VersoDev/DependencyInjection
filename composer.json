@@ -1,0 +1,19 @@
+{
+  "name": "verso/dependency-injection",
+  "description": "A simple dependancy injection system made for Verso.",
+  "type": "library",
+  "authors": [
+    {
+      "name": "Choukas69",
+      "email": "juan.vlroo@gmail.com"
+    }
+  ],
+  "autoload": {
+    "psr-4": {
+      "DI\\": "src/"
+    }
+  },
+  "require": {
+    "psr/container": "^1.0"
+  }
+}
