@@ -2,7 +2,7 @@
 
 namespace DI;
 
-use DI\Exceptions\InvalidDependencyException;
+use DI\Exceptions\NotFoundException;
 use Psr\Container\ContainerInterface;
 
 class Container implements ContainerInterface
@@ -23,10 +23,10 @@ class Container implements ContainerInterface
      */
     public function __construct(array $definitions)
     {
-        $this->resolver = new Resolver($definitions);
+        $this->resolver = new Resolver($this, $definitions);
 
-        foreach (array_keys($definitions) as $definition) {
-            $this->dependencies[$definition] = $this->resolver->resolveDefinition($definition);
+        foreach ($definitions as $key => $definition) {
+            $this->dependencies[$key] = $this->resolver->resolve($key);
         }
     }
 
@@ -35,17 +35,17 @@ class Container implements ContainerInterface
      */
     public function get($id)
     {
-        if ($this->has($id)) {
+        if (array_key_exists($id, $this->dependencies)) {
             return $this->dependencies[$id];
         } else {
-            try {
-                return $this->resolver->resolveDependency($id);
-            } catch (InvalidDependencyException $e) {
-                echo $e->getMessage();
+            $dependency = $this->resolver->resolve($id);
+
+            if (isset($dependency)) {
+                return $dependency;
+            } else {
+                throw new NotFoundException();
             }
         }
-
-        return null;
     }
 
     /**
@@ -53,6 +53,10 @@ class Container implements ContainerInterface
      */
     public function has($id)
     {
-        return isset($this->dependencies[$id]);
+        if (array_key_exists($id, $this->dependencies)) {
+            return true;
+        } else {
+            return $this->resolver->isResolvable($id);
+        }
     }
 }

@@ -2,22 +2,12 @@
 
 namespace DI;
 
-use DI\Types\Definition;
-
 class ContainerBuilder
 {
     /**
-     * @var Definition[]
+     * @var array
      */
-    private array $dependencies;
-
-    /**
-     * ContainerBuilder constructor.
-     */
-    public function __construct()
-    {
-        $this->dependencies = [];
-    }
+    private array $dependencies = [];
 
     /**
      * @param mixed $key
@@ -25,7 +15,7 @@ class ContainerBuilder
      *
      * @return self
      */
-    public function addDefinition($key, $value): self
+    public function addDependency($key, $value): self
     {
         $this->dependencies[$key] = $value;
 

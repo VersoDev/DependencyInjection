@@ -2,132 +2,157 @@
 
 namespace DI;
 
-use DI\Exceptions\InvalidDependencyException;
-use DI\Types\ArrayDefinition;
-use DI\Types\ClassDefinition;
-use DI\Types\Definition;
-use DI\Types\ScalarDefinition;
+use DI\Definitions\ArrayDefinition;
+use DI\Definitions\ClassDefinition;
+use DI\Definitions\Definition;
+use DI\Definitions\FactoryDefinition;
+use DI\Definitions\ScalarDefinition;
+use DI\Definitions\StaticDefinition;
+use DI\Exceptions\NonInstantiableDependencyException;
+use DI\Exceptions\UndefinedDependencyKeyException;
+use Psr\Container\ContainerInterface;
 use ReflectionClass;
 use ReflectionException;
-use RuntimeException;
+use ReflectionNamedType;
 
+/**
+ * Class Resolver
+ * @package DI
+ */
 class Resolver
 {
     /**
-     * @var Definition[]
+     * @var Definition[] Array of resolved definitions.
      */
     private array $definitions = [];
 
     /**
      * Resolver constructor.
-     * @param array $definitions
+     *
+     * @param ContainerInterface $container Container of the App.
+     * @param array $definitions Definitions created in the config.
      */
-    public function __construct(array $definitions)
+    public function __construct(ContainerInterface $container, array $definitions)
     {
+        // Add the ContainerInterface to the definitions as a StaticDefinition
+        $this->definitions[ContainerInterface::class] = new StaticDefinition($container);
+
         foreach ($definitions as $key => $definition) {
-            $this->definitions[$key] = $this->parse($definition);
+            try {
+                $this->definitions[$key] = $this->make($definition);
+            } catch (NonInstantiableDependencyException $e) {
+            } catch (UndefinedDependencyKeyException $e) {
+            }
         }
     }
 
     /**
-     * @param mixed $definition
-     * @return Definition|null
+     * Resolve a dependency.
+     *
+     * @param mixed $dependency Dependency to resolve.
+     * @return mixed|null Resolved dependency.
      */
-    private function parse($definition): ?Definition
+    public function resolve($dependency)
     {
-        // Gestion des clés (de la forme %cle%)
-        if (is_string($definition)) {
-            if (preg_match("#^%(.+)%$#", $definition, $match)) {
-                if (isset($this->definitions[$match[1]])) {
-                    return $this->definitions[$match[1]];
-                } else {
-                    //Erreur l'indice n'existe pas
-                }
-            } else {
-                return new ScalarDefinition($definition);
-            }
-        } else if (is_scalar($definition)) {
-            return new ScalarDefinition($definition);
-        } else if (is_array($definition)) {
-            return new ArrayDefinition($definition);
+        if (array_key_exists($dependency, $this->definitions)) {
+            return ($this->definitions[$dependency])->resolve();
         } else {
-            if (isset($this->definitions[$definition])) {
-                return $this->definitions[$definition];
-            } else {
-                if (class_exists($definition) || interface_exists($definition)) {
+            try {
+                $definition = $this->make($dependency);
+
+                if (isset($definition)) {
+                    return $definition->resolve();
+                } else {
+                    return null;
+                }
+            } catch (NonInstantiableDependencyException | UndefinedDependencyKeyException $ignored) {
+                echo $ignored->getMessage();
+
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Constructs a definition associated with $dependency.
+     *
+     * @param mixed $dependency Dependency to create.
+     * @return Definition|null Created definition.
+     * @throws NonInstantiableDependencyException
+     * @throws UndefinedDependencyKeyException
+     */
+    private function make($dependency): ?Definition
+    {
+        if (is_string($dependency)) {
+            if (preg_match("#^%(.+)%$#", $dependency, $key)) {
+                if (isset($this->definitions[$key[1]])) {
+                    return $this->definitions[$key[1]];
+                } else {
+                    throw new UndefinedDependencyKeyException();
+                }
+            } else if (class_exists($dependency) || interface_exists($dependency)) {
+                if (array_key_exists($dependency, $this->definitions)) {
+                    return $this->definitions[$dependency];
+                } else {
                     try {
-                        $class = new ReflectionClass($definition);
+                        $class = new ReflectionClass($dependency);
 
                         if ($class->isInstantiable()) {
                             $constructor = $class->getConstructor();
 
-                            if (!is_null($constructor)) {
-                                $parameters = [];
+                            if ($constructor) {
+                                $params = [];
 
                                 foreach ($constructor->getParameters() as $parameter) {
-                                    $parameterType = $parameter->getType();
-
-                                    if (!is_null($parameterType)) {
-                                        if (class_exists($parameterType->getName()) || interface_exists($parameterType->getName())) {
-                                            $parameters[] = $this->parse($parameterType->getName());
-                                        } else {
-                                            // TODO : change for annotations
-                                            // Si le constructeur a une annot @Inject sur le paramètre en question, c'est ok
-                                            if (isset($this->definitions[$parameter->getName()])) {
-                                                $parameters[] = $this->definitions[$parameter->getName()];
-                                            } else {
-                                                throw new RuntimeException("Impossible to resolve the dependency");
-                                            }
-                                        }
+                                    if (($type = $parameter->getType()) && $type instanceof ReflectionNamedType) {
+                                        $params[] = $this->make($type->getName());
                                     } else {
-                                        throw new RuntimeException("The field has no declared types");
+                                        // Erreur : le paramètre ne possède pas de type
+                                        // Peut être réglé avec un ->constructor()
                                     }
                                 }
 
-                                return new ClassDefinition($class, $parameters);
+                                if ($class->implementsInterface(FactoryInterface::class)) {
+                                    return new FactoryDefinition($class->getName(), $params);
+                                } else {
+                                    return new ClassDefinition($class->getName(), $params);
+                                }
                             } else {
-                                return new ClassDefinition($class);
+                                return new ClassDefinition($class->getName());
                             }
                         } else {
-                            throw new RuntimeException("Non instanciable class");
+                            throw new NonInstantiableDependencyException();
                         }
+
                     } catch (ReflectionException $ignored) {
-                        return null;
                     }
                 }
-
             }
+        }
+
+        if (is_scalar($dependency)) {
+            return new ScalarDefinition($dependency);
+        } else if (is_array($dependency)) {
+            return new ArrayDefinition($dependency);
         }
 
         return null;
     }
 
     /**
-     * @param mixed $definition
-     * @return mixed
+     * Indicate if an id is resolvable.
+     *
+     * @param string $id Id to test.
+     * @return bool Result of the test.
      */
-    public function resolveDefinition($definition)
+    public function isResolvable(string $id): bool
     {
-        return $this->definitions[$definition]->resolve();
-    }
-
-    /**
-     * @param $dependency
-     * @return mixed
-     * @throws InvalidDependencyException
-     */
-    public function resolveDependency($dependency)
-    {
-        if (isset($this->definitions[$dependency])) {
-            return $this->definitions[$dependency]->resolve();
-        } else {
-            if (class_exists($dependency)) {
-                $dependency = $this->parse($dependency);
-
-                return $dependency->resolve();
-            } else {
-                throw new InvalidDependencyException();
-            }
+        try {
+            $definition = $this->make($id);
+        } catch (NonInstantiableDependencyException $e) {
+        } catch (UndefinedDependencyKeyException $e) {
         }
+
+        return isset($definition);
     }
 }

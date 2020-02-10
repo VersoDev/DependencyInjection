@@ -1,18 +1,16 @@
 <?php
 
-namespace DI\Types;
-
-use ReflectionClass;
+namespace DI\Definitions;
 
 class ClassDefinition implements Definition
 {
     /**
-     * @var ReflectionClass
+     * @var string
      */
-    private ReflectionClass $class;
+    private string $class;
 
     /**
-     * @var array
+     * @var Definition[]
      */
     private array $params;
 
@@ -23,10 +21,10 @@ class ClassDefinition implements Definition
 
     /**
      * ClassDefinition constructor.
-     * @param ReflectionClass $class
-     * @param array $params
+     * @param string $class
+     * @param Definition[] $params
      */
-    public function __construct(ReflectionClass $class, array $params = [])
+    public function __construct(string $class, array $params = [])
     {
         $this->class = $class;
         $this->params = $params;
@@ -44,7 +42,8 @@ class ClassDefinition implements Definition
                 $params[] = $param->resolve();
             }
 
-            $this->instance = $this->class->newInstance(...$params);
+            $class = $this->class;
+            $this->instance = new $class(...$params);
         }
 
         return $this->instance;

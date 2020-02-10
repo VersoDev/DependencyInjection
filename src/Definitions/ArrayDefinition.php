@@ -1,6 +1,6 @@
 <?php
 
-namespace DI\Types;
+namespace DI\Definitions;
 
 class ArrayDefinition implements Definition
 {
